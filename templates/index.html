@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+    <title>Pronóstico de Ventas - 5 Productos</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: #c71111;
+            margin-bottom: 10px;
+        }
+
+        .form-section,
+        .producto {
+            background: white;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .info-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        input[type="file"] {
+            width: 100%;
+        }
+
+        input[type="number"] {
+            width: 150px;
+        }
+
+        button {
+            background-color: #c71111;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background-color: #a00e0e;
+        }
+
+        .producto-titulo {
+            font-size: 18px;
+            font-weight: bold;
+            color: #c71111;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #c71111;
+            padding-bottom: 10px;
+        }
+
+        .metricas {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .metrica {
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 3px;
+            text-align: center;
+            border-left: 3px solid #c71111;
+        }
+
+        .metrica-label {
+            font-weight: bold;
+            color: #666;
+            font-size: 12px;
+        }
+
+        .metrica-valor {
+            font-size: 18px;
+            color: #c71111;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            font-size: 12px;
+            background: white;
+        }
+
+        th {
+            background: #c71111;
+            color: white;
+            padding: 10px;
+            text-align: left;
+        }
+
+        td {
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        tr:hover {
+            background: #f9f9f9;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 20px;
+        }
+
+        .error {
+            color: white;
+            padding: 10px;
+            background: #d32f2f;
+            border-radius: 3px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .loading {
+            text-align: center;
+            color: #c71111;
+            font-weight: bold;
+            display: none;
+            padding: 20px;
+        }
+
+        .footer {
+            text-align: center;
+            color: #777;
+            font-size: 13px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Pronóstico de Ventas - 5 Productos</h1>
+
+        <div class="form-section">
+            <div id="error" class="error"></div>
+
+            <div class="form-group">
+                <label for="archivo">Selecciona el archivo CSV:</label>
+                <input type="file" id="archivo" accept=".csv" required>
+                <div class="info-text">Carga el archivo con los datos de ventas.</div>
+            </div>
+
+            <div class="form-group">
+                <label for="ventana">Ventana (N):</label>
+                <input type="number" id="ventana" value="3" min="2" required>
+                <div class="info-text">Número de periodos para calcular la media móvil.</div>
+            </div>
+
+            <button type="button" onclick="calcular()">Calcular Pronóstico</button>
+        </div>
+
+        <div id="loading" class="loading">Procesando...</div>
+        <div id="resultados"></div>
+
+        <div class="footer">
+            Universidad del Valle - Implementación de Algoritmos | 2026 | Desarrollado por Jhan Parra
+        </div>
+    </div>
+
+    <script>
+        const charts = {};
+
+        function generarIdSeguro(texto) { //Función para generar un ID seguro para los elementos del DOM
+            return texto.replace(/[^a-zA-Z0-9_-]/g, '_');
+        }
+
+        async function calcular() { //Función para manejar el proceso de cálculo del pronóstico
+            const archivoInput = document.getElementById('archivo');
+            const archivo = archivoInput.files[0];
+            const ventana = document.getElementById('ventana').value;
+            const errorDiv = document.getElementById('error');
+            const loading = document.getElementById('loading');
+            const resultadosDiv = document.getElementById('resultados'); //Referencia al contenedor de resultados
+
+            if (!archivo) {
+                errorDiv.textContent = 'Selecciona un archivo CSV';
+                errorDiv.style.display = 'block'; //Muestra el mensaje de error si no se ha seleccionado un archivo
+                return;
+            }
+
+            errorDiv.style.display = 'none'; //Oculta el mensaje de error antes de iniciar el proceso
+            loading.style.display = 'block';
+            resultadosDiv.innerHTML = ''; //Limpia los resultados anteriores antes de mostrar los nuevos
+
+            const formData = new FormData();
+            formData.append('archivo', archivo); //Agrega el archivo al FormData
+            formData.append('ventana', ventana); //Agrega el valor de la ventana al FormData
+
+            try {
+                const response = await fetch('/calcular', { //Realiza la solicitud POST al servidor para calcular el pronóstico
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                loading.style.display = 'none';
+
+                if (!response.ok || data.error) {
+                    errorDiv.textContent = data.error || 'Ocurrió un error al procesar el archivo';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+
+                mostrarResultados(data.productos);
+
+            } catch (error) {
+                loading.style.display = 'none';
+                errorDiv.textContent = 'Error: ' + error.message;
+                errorDiv.style.display = 'block';
+            }
+        }
+
+        function mostrarResultados(productos) { //Función para mostrar los resultados de cada producto en el DOM, incluyendo las métricas, la tabla de datos y el gráfico correspondiente
+            const resultadosDiv = document.getElementById('resultados'); //Referencia al contenedor de resultados
+            let html = ''; //Genera el HTML para mostrar los resultados de cada producto, incluyendo las métricas, la tabla de datos y el gráfico correspondiente
+
+            for (const producto in productos) { //Itera sobre cada producto en los resultados y genera el HTML para mostrar sus métricas, tabla de datos y gráfico
+                const info = productos[producto];
+                const idSeguro = generarIdSeguro(producto); //Genera un ID seguro para el producto, que se utilizará para identificar el canvas del gráfico correspondiente a ese producto
+
+                html += `
+                    <div class="producto">
+                        <div class="producto-titulo">${producto}</div>
+
+                        <div class="metricas">
+                            <div class="metrica">
+                                <div class="metrica-label">MAPE</div>
+                                <div class="metrica-valor">${(info.metricas.MAPE * 100).toFixed(2)}%</div> <!-- Muestra el valor del MAPE con formato de porcentaje -->
+                            </div>
+                            <div class="metrica">
+                                <div class="metrica-label">MAPE'</div>
+                                <div class="metrica-valor">${(info.metricas.MAPE_prima * 100).toFixed(2)}%</div> <!-- Muestra el valor del MAPE' con formato de porcentaje -->
+                            </div>
+                            <div class="metrica">
+                                <div class="metrica-label">MSE</div>
+                                <div class="metrica-valor">${info.metricas.MSE.toFixed(2)}</div>
+                            </div>
+                            <div class="metrica">
+                                <div class="metrica-label">RMSE</div>
+                                <div class="metrica-valor">${info.metricas.RMSE.toFixed(2)}</div>
+                            </div>
+                        </div>
+
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Periodo</th>
+                                    <th>Valor</th>
+                                    <th>Pronóstico</th>
+                                    <th>Error %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${generarFilas(info)}
+                            </tbody>
+                        </table>
+
+                        <div class="chart-container">
+                            <canvas id="chart-${idSeguro}"></canvas>
+                        </div>
+                    </div>
+                `;
+            }
+
+            resultadosDiv.innerHTML = html; //Inserta el HTML generado en el contenedor de resultados para mostrar los resultados de cada producto en el DOM
+
+            for (const producto in productos) {
+                crearGrafico(producto, productos[producto]); //Crea el gráfico para cada producto utilizando la función crearGrafico, pasando el nombre del producto y su información correspondiente
+            }
+        }
+
+        function generarFilas(info) {
+            let html = '';
+            const max = Math.min(10, info.datos.ventas.length); //Limita el número de filas a mostrar a 10 o al número total de periodos disponibles, lo que sea menor
+
+            for (let i = 0; i < max; i++) {
+                const valor = Number(info.datos.ventas[i]) || 0;
+                const pronostico = Number(info.datos.Pronostico[i]) || 0; //Obtiene el valor real y el pronóstico para el periodo actual, asegurándose de que sean números válidos (si no lo son, se asigna 0)
+                const ape = Number(info.datos.ape[i]) || 0;
+
+                html += ` <!-- Genera una fila de la tabla para el periodo actual, mostrando el número de periodo, el valor real, el pronóstico y el error porcentual (APE) con formato de porcentaje -->
+                    <tr>
+                        <td>${i + 1}</td>
+                        <td>${valor.toFixed(2)}</td>
+                        <td>${pronostico.toFixed(2)}</td>
+                        <td>${(ape * 100).toFixed(2)}%</td>
+                    </tr>
+                `;
+            }
+
+            return html;
+        }
+
+        function crearGrafico(producto, info) { //Función para crear el gráfico de cada producto utilizando Chart.js, obteniendo el contexto del canvas correspondiente y configurando el gráfico con los datos reales y pronosticados
+            const idSeguro = generarIdSeguro(producto); //Genera un ID seguro para el producto, que se utilizará para identificar el canvas del gráfico correspondiente a ese producto
+            const canvas = document.getElementById(`chart-${idSeguro}`); //Obtiene el elemento canvas correspondiente al producto utilizando su ID seguro para poder dibujar el gráfico en ese canvas específico
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d'); //Obtiene el contexto del canvas para dibujar el gráfico utilizando Chart.js
+
+            if (charts[idSeguro]) {
+                charts[idSeguro].destroy(); //Si ya existe un gráfico para ese producto, lo destruye antes de crear uno nuevo para evitar problemas de renderizado o superposición de gráficos en el mismo canvas
+            }
+
+            charts[idSeguro] = new Chart(ctx, { //Crea un nuevo gráfico de tipo línea utilizando Chart.js, configurando las etiquetas del eje x con los periodos y los datasets para los valores reales y pronosticados, con estilos personalizados para cada dataset
+                type: 'line',
+                data: {
+                    labels: info.grafico.periodos.map(p => p + 1),
+                    datasets: [
+                        {
+                            label: 'Valores Reales',
+                            data: info.grafico.valores,
+                            borderColor: '#c71111',
+                            backgroundColor: 'rgba(199, 17, 17, 0.10)', //Color de fondo con transparencia para el área bajo la curva de los valores reales
+                            borderWidth: 2, //Estilo de línea sólida para los valores reales
+                            tension: 0.2,
+                            fill: false
+                        },
+                        {
+                            label: 'Pronóstico',
+                            data: info.grafico.pronostico,
+                            borderColor: '#667eea',
+                            borderWidth: 2, //Estilo de línea discontinua para el pronóstico
+                            borderDash: [5, 5],
+                            tension: 0.2,
+                            fill: false
+                        }
+                    ]
+                },
+                options: { //Configura las opciones del gráfico para hacerlo
+                    responsive: true, //Hace que el gráfico sea responsive, adaptándose al tamaño del contenedor
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top' //Coloca la leyenda en la parte superior del gráfico
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false //Configura el eje y para que no comience necesariamente en cero, lo que permite una mejor visualización de los datos si los valores son relativamente altos o bajos
+                        }
+                    }
+                }
+            });
+        }
+
+        document.getElementById('archivo').addEventListener('change', function () { //Agrega un evento de cambio al input de archivo para ocultar el mensaje de error cuando el usuario selecciona un nuevo archivo, lo que mejora la experiencia del usuario al no mostrar mensajes de error obsoletos después de que han corregido el problema
+            document.getElementById('error').style.display = 'none';
+        });
+
+        document.addEventListener('keypress', function (e) { //Agrega un evento de tecla presionada a todo el documento para permitir que el usuario inicie el cálculo del pronóstico presionando la tecla Enter, lo que mejora la accesibilidad y la usabilidad de la aplicación al permitir una interacción más rápida sin necesidad de hacer clic en el botón
+            if (e.key === 'Enter') {
+                calcular();
+            }
+        });
+    </script>
+</body>
+</html>
