@@ -193,6 +193,12 @@
                 <div class="info-text">Número de periodos para calcular la media móvil.</div>
             </div>
 
+            <div class="form-group">
+                <label for="horizonte">Horizonte (periodos):</label>
+                <input type="number" id="horizonte" value="0" min="0" required>
+                <div class="info-text">Cuántos periodos hacia adelante se desea pronosticar (usando pronósticos previos para cada paso).</div>
+            </div>
+
             <button type="button" onclick="calcular()">Calcular Pronóstico</button>
         </div>
 
@@ -215,6 +221,7 @@
             const archivoInput = document.getElementById('archivo');
             const archivo = archivoInput.files[0];
             const ventana = document.getElementById('ventana').value;
+            const horizonte = document.getElementById('horizonte').value;
             const errorDiv = document.getElementById('error');
             const loading = document.getElementById('loading');
             const resultadosDiv = document.getElementById('resultados'); //Referencia al contenedor de resultados
@@ -232,6 +239,7 @@
             const formData = new FormData();
             formData.append('archivo', archivo); //Agrega el archivo al FormData
             formData.append('ventana', ventana); //Agrega el valor de la ventana al FormData
+            formData.append('horizonte', horizonte); //Agrega el número de periodos a pronosticar en el futuro
 
             try {
                 const response = await fetch('/calcular', { //Realiza la solicitud POST al servidor para calcular el pronóstico
@@ -263,13 +271,23 @@
             let html = ''; //Genera el HTML para mostrar los resultados de cada producto, incluyendo las métricas, la tabla de datos y el gráfico correspondiente
 
             for (const producto in productos) { //Itera sobre cada producto en los resultados y genera el HTML para mostrar sus métricas, tabla de datos y gráfico
-                const info = productos[producto];
+                const modelos = productos[producto];
                 const idSeguro = generarIdSeguro(producto); //Genera un ID seguro para el producto, que se utilizará para identificar el canvas del gráfico correspondiente a ese producto
 
-                html += `
-                    <div class="producto">
-                        <div class="producto-titulo">${producto}</div>
+                html += `<div class="producto"><div class="producto-titulo">${producto}</div>`;
 
+                const nombresModelos = {
+                    'media_movil': 'Media Móvil',
+                    'exponential_smoothing': 'Suavización Exponencial Simple',
+                    'prophet': 'Prophet'
+                };
+
+                for (const modelo in modelos) {
+                    const info = modelos[modelo];
+                    const modeloId = `${idSeguro}_${modelo}`;
+
+                    html += `
+                        <h3>${nombresModelos[modelo]}</h3>
                         <div class="metricas">
                             <div class="metrica">
                                 <div class="metrica-label">MAPE</div>
@@ -304,43 +322,68 @@
                         </table>
 
                         <div class="chart-container">
-                            <canvas id="chart-${idSeguro}"></canvas>
+                            <canvas id="chart-${modeloId}"></canvas>
                         </div>
-                    </div>
-                `;
+                    `;
+                }
+
+                html += `</div>`;
             }
 
             resultadosDiv.innerHTML = html; //Inserta el HTML generado en el contenedor de resultados para mostrar los resultados de cada producto en el DOM
 
             for (const producto in productos) {
-                crearGrafico(producto, productos[producto]); //Crea el gráfico para cada producto utilizando la función crearGrafico, pasando el nombre del producto y su información correspondiente
+                const modelos = productos[producto];
+                for (const modelo in modelos) {
+                    crearGrafico(`${producto}_${modelo}`, modelos[modelo]); //Crea el gráfico para cada modelo de cada producto
+                }
             }
         }
 
         function generarFilas(info) {
             let html = '';
-            const max = Math.min(10, info.datos.ventas.length); //Limita el número de filas a mostrar a 10 o al número total de periodos disponibles, lo que sea menor
+            let rowCount = 0;
+            const total = info.datos.ventas.length;
+            const max = 10; // Mostrar hasta 10 filas, priorizando los periodos más recientes
+            const start = Math.max(0, total - max);
 
-            for (let i = 0; i < max; i++) {
-                const valor = Number(info.datos.ventas[i]) || 0;
-                const pronostico = Number(info.datos.Pronostico[i]) || 0; //Obtiene el valor real y el pronóstico para el periodo actual, asegurándose de que sean números válidos (si no lo son, se asigna 0)
-                const ape = Number(info.datos.ape[i]) || 0;
+            const formatNumber = (value) => {
+                if (value === null || value === undefined || isNaN(value)) return '-';
+                return Number(value).toFixed(2);
+            };
 
+            for (let i = start; i < total; i++) {
+                const valor = info.datos.ventas[i];
+                const pronostico = info.datos.Pronostico[i];
+                const ape = info.datos.ape[i];
+
+                // Mostrar solo los periodos con valor y pronóstico no nulos (período histórico válido)
+                if (valor === null || pronostico === null) continue;
+
+                const apeDisplay = (ape === null || ape === undefined || isNaN(ape))
+                    ? '-'
+                    : `${(ape * 100).toFixed(2)}%`;
+
+                rowCount += 1;
                 html += ` <!-- Genera una fila de la tabla para el periodo actual, mostrando el número de periodo, el valor real, el pronóstico y el error porcentual (APE) con formato de porcentaje -->
                     <tr>
                         <td>${i + 1}</td>
-                        <td>${valor.toFixed(2)}</td>
-                        <td>${pronostico.toFixed(2)}</td>
-                        <td>${(ape * 100).toFixed(2)}%</td>
+                        <td>${formatNumber(valor)}</td>
+                        <td>${formatNumber(pronostico)}</td>
+                        <td>${apeDisplay}</td>
                     </tr>
                 `;
+            }
+
+            if (rowCount === 0) {
+                html = '<tr><td colspan="4" style="text-align:center; color:#666;">No hay datos históricos para mostrar</td></tr>';
             }
 
             return html;
         }
 
-        function crearGrafico(producto, info) { //Función para crear el gráfico de cada producto utilizando Chart.js, obteniendo el contexto del canvas correspondiente y configurando el gráfico con los datos reales y pronosticados
-            const idSeguro = generarIdSeguro(producto); //Genera un ID seguro para el producto, que se utilizará para identificar el canvas del gráfico correspondiente a ese producto
+        function crearGrafico(productoModelo, info) { //Función para crear el gráfico de cada producto utilizando Chart.js, obteniendo el contexto del canvas correspondiente y configurando el gráfico con los datos reales y pronosticados
+            const idSeguro = generarIdSeguro(productoModelo); //Genera un ID seguro para el producto y modelo
             const canvas = document.getElementById(`chart-${idSeguro}`); //Obtiene el elemento canvas correspondiente al producto utilizando su ID seguro para poder dibujar el gráfico en ese canvas específico
             if (!canvas) return;
 
